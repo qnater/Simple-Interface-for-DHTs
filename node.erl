@@ -2,4 +2,4 @@
 -export([launch/1]).
 
 launch(N) ->
-  io:format("~nStarting ~w nodes...~n", [N]).
+  io:format("~nStarting '~w' nodes...~n", [N]).
