@@ -1,6 +1,6 @@
 -module(node).
 
--export([launch/1, deploy/1, deploy/2, connect/2, notify/3, request/2, stabilize/3, handle_node/1, node/3, create_probe/2, remove_probe/2, forward_probe/5]).
+-export([launch/1, deploy/1, deploy/3, connect/2, notify/4, request/2, stabilize/3, handle_node/1, node/4, create_probe/3, remove_probe/2, forward_probe/6, handover/3, add/8, lookup/7,addEntry/4, getEntry/3]).
 
 %Size of the ring
 -define(Mbit,64).
@@ -33,18 +33,17 @@ launch(N) ->
 
 
 deploy(N) ->
-  deploy(N, nil).
+  deploy(N, nil, []).
 
-deploy(Id, Peer) ->
+deploy(Id, Peer, Store) ->
   timer:start(),
-  spawn(fun() -> init(Id, Peer) end).
-  
+  spawn(fun() -> init(Id, Peer, Store) end).
 
-init(Id, Peer) ->
+init(Id, Peer, Store) ->
   Predecessor = nil,
   {ok,Successor} = connect(Id, Peer),
   handle_stabilize(),
-  node(Id,Predecessor,Successor).
+  node(Id,Predecessor,Successor, Store).
 
 
 handle_stabilize() ->
@@ -53,10 +52,8 @@ handle_stabilize() ->
 
 connect(Id, nil) ->
   % When we enter, we are our own successor
-  io:format("New one connect  ~w ~n", [Id]),
   {ok, {Id, self()}};
-connect(Id, Peer) ->
-  io:format("New one connect  ~w ~n", [Id]),
+connect(_, Peer) ->
   Qref = make_ref(),
   Peer ! {key, Qref, self()},
   receive
@@ -67,49 +64,97 @@ connect(Id, Peer) ->
   end.
 
   
-node(Id,Predecessor,Successor) ->
+node(Id,Predecessor,Successor,Store) ->
   receive
-  {key,Qref,Peer} ->
-    %Peer : node asking, QRef : the key / a peer needs to know our key
-    Peer ! {Qref, Id},
-    node(Id, Predecessor, Successor);
-  {notify,New} ->
-    Pred = notify(New, Id, Predecessor),
-    node(Id, Pred, Successor);
-  {request, Peer} ->
+  % ... Actions ......................................
+  {key,Qref,Peer} -> % Peer : node asking, QRef : the key / a peer needs to know our key
+    Peer ! {Qref, Id}, 
+    node(Id, Predecessor, Successor, Store);
+  {notify, New} -> % A new node informs us of its existence
+    {Pred, Keep} = notify(New, Id, Predecessor, Store),
+    node(Id, Pred, Successor, Keep);
+  {request, Peer} -> % A predecessor needs to know our predecessor
     request(Peer, Predecessor),
-    node(Id, Predecessor, Successor);
-  {status, Pred} ->
+    node(Id, Predecessor, Successor, Store);
+  {status, Pred} -> % Our successor informs us about its predecessor
     Succ = stabilize(Pred, Id, Successor),
-    node(Id, Predecessor, Succ);
-  stabilize -> 
+    node(Id, Predecessor, Succ, Store);
+  stabilize -> % stabilize the ring
     {_, Spid} = Successor,
     Spid ! {request, self()},
-    node(Id, Predecessor, Successor);
+    node(Id, Predecessor, Successor, Store);
+
+  % ... Informations/Tests ...........................
   probe ->
-    create_probe(Id, Successor),
-    node(Id, Predecessor, Successor);
+    create_probe(Id, Successor, Store),
+    node(Id, Predecessor, Successor, Store);
   {probe, Id, Nodes, T} ->
     remove_probe(T, Nodes),
-    node(Id, Predecessor, Successor);
+    node(Id, Predecessor, Successor, Store);
   {probe, Ref, Nodes, T} ->
-    forward_probe(Ref, T, Nodes, Id, Successor),
-    node(Id, Predecessor, Successor)
+    forward_probe(Ref, T, Nodes, Id, Successor, Store),
+    node(Id, Predecessor, Successor, Store);
+  {add, Key, Value, Qref, Client} ->
+    Added = add(Key, Value, Qref, Client, Id, Predecessor, Successor, Store),
+    node(Id, Predecessor, Successor, Added);
+  {lookup, Key, Qref, Client} ->
+    lookup(Key, Qref, Client, Id, Predecessor, Successor, Store),
+    node(Id, Predecessor, Successor, Store);
+  {handover, Elements} ->
+    Merged = lists:keymerge(1, Elements, Store),
+    node(Id, Predecessor, Successor, Merged);
+  logs ->
+    io:format("RESULT> ~w -> Pred:~w Succ:~w STORE:~w~n",[Id,Predecessor,Successor,Store])
   end.
 
-notify({NewKey,NewPid},Id,Predecessor) ->
- case Predecessor of
-  nil ->
-    {NewKey, NewPid};
-  {Pkey, _} ->
-    case key:between(NewKey, Pkey, Id) of
+% add a key value pair, return the updated store
+add(Key, Value, Qref, Client, Id, {Pkey, _}, {_, Spid}, Store) ->
+  case key:between(Key, Pkey, Id) of
       true ->
-        {NewKey, NewPid};
+          Client ! {Qref, keyok},
+          lists:keystore(Key, 1, Store, {Key, Value}); 
       false ->
-        Predecessor
-    end
+          Spid ! {add, Key, Value, Qref, Client},
+          Store
   end.
 
+% return a tuple {Key, Value} or the atom false
+lookup(Key, Qref, Client, Id, {Pkey, _}, Successor, Store) ->
+    case key:between(Key, Pkey, Id) of
+        true ->
+            Result = lists:keyfind(Key, 1, Store),
+            io:format(">> ~w (L) : Lookup resut : ~w~n",[Id,Result]),
+            {_,R} = Result,
+            Client ! {Qref,R};
+        false ->
+            {_, Spid} = Successor,
+            Spid ! {lookup, Key, Qref, Client}
+        end.
+
+
+
+handover(Store, Nkey, Npid) ->
+  {Leave, Keep} = lists:partition(fun({K,_}) -> K =< Nkey end, Store),
+  Npid ! {handover, Leave},
+  Keep.
+
+
+% A way for a node to make a friendly proposal that it might be our proper predecessor. 
+notify({Nkey, Npid}, Id, Predecessor, Store) ->
+    case Predecessor of
+        nil ->  
+            Keep = handover(Store, Nkey, Npid),
+            {{Nkey, Npid}, Keep};
+        {Pkey, _} ->
+            % We can not take their word for it, so we have to do our own investigation.
+            case key:between(Nkey, Pkey, Id) of
+                true -> 
+                    Keep = handover(Store, Nkey, Npid),
+                    {{Nkey, Npid}, Keep};
+                false ->  
+                    {Predecessor, Store}
+            end
+    end.
 
 request(Peer, Predecessor) ->
  case Predecessor of
@@ -138,31 +183,52 @@ stabilize(Pred, Id, Successor) ->
       % successor and run stabilization again.
       false ->
           Xpid ! {request, self()},
-          io:format("~w : updates successor from ~w to ~w ~n",[Id, Skey, Xkey]),
+          io:format("~w (U) : updates successor from ~w to ~w ~n",[Id, Skey, Xkey]),
           Pred;
       true -> 
           Spid ! {notify, {Id, self()}},
-          io:format("~w : sending notify to ~w (pred : ~w )~n",[Id, Skey, Xkey]),
+          io:format("~w (N) : sending notify to ~w (pred : ~w)~n",[Id, Skey, Xkey]),
           Successor
       end
   end.
 
-create_probe(Id, Successor) ->
-  {Skey, Spid} = Successor,
-  Spid ! {probe, Id, [{Skey, Spid}], erlang:timestamp()}.
+create_probe(Id, Successor, Store) ->
+  {_, Spid} = Successor,
+  Spid ! {probe, Id, [{Id, self(), Store}], erlang:timestamp()}.
+
 
 remove_probe(T, Nodes) ->
   io:format("Probe : ~n",[]),
   lists:foreach(
-    fun({Key, _}) -> io:format("Node ~w ~n", [Key]) end, Nodes),
+    fun({Key, _, Store}) -> 
+            io:format("    Node ~w :~n", [Key]),
+            io:format("       Store:~n",[]), 
+            lists:foreach(
+              fun({K,V}) ->
+                  io:format("        [~w] -> [~w]~n", [K, V]) 
+              end,
+              Store)
+    end,
+    Nodes),
   io:format("Took ~w ms.~n",[timer:now_diff(erlang:timestamp(), T)]).
 
-forward_probe(Ref, T, Nodes, _Id, Successor) ->
-  {Skey, Spid} = Successor,
-  Spid ! {probe, Ref, [{Skey, Spid}|Nodes], T}.
-
+forward_probe(Ref, T, Nodes, Id, Successor, Store) ->
+  {_, Spid} = Successor,
+  Spid ! {probe, Ref, [{Id, self(), Store}|Nodes], T}.
 
 handle_node(Id) ->
   NodeId = erlang:phash2(Id) rem ?Mbit,
   io:format("~nStarting nodes : '~w'~nNode ID : ~w~n", [Id, NodeId]),  
-  node(Id,{},{}).
+  node(Id,{},{},[]).
+
+
+addEntry(Key, Value, NodePid, Client) ->
+  Qref = make_ref(),
+  NodePid ! {add, Key, Value, Qref, Client},
+  Qref.
+
+
+getEntry(Key, NodePid, Client) ->
+  Qref = make_ref(),
+  NodePid ! {lookup, Key, Qref, Client},
+  Qref.
