@@ -4,7 +4,7 @@
 start() ->
 	io:fwrite("........................................~n...Simple Interface for DHTs............~n...Quentin Nater & Christopher Artero...~n...University of Fribourg / 2021........~n........................................~n"),
   
-  c:c(node),
+  c:c(node2),
   c:c(key),
-  c:c(run),
-  run:start().
+  c:c(run2),
+  run2:start().
