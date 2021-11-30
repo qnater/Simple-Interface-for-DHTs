@@ -1,6 +1,6 @@
 -module(node).
 
--export([launch/1, deploy/1, deploy/3, connect/2, notify/4, request/2, stabilize/3, handle_node/1, node/4, create_probe/3, remove_probe/2, forward_probe/6, handover/3, add/8, lookup/7,addEntry/4, getEntry/3]).
+-export([deploy/1, deploy/3, connect/2, notify/4, request/2, stabilize/3, node/4, create_probe/3, remove_probe/2, forward_probe/6, handover/3, add/8, lookup/7,addEntry/4, getEntry/3]).
 
 %Size of the ring
 -define(Mbit,64).
@@ -8,29 +8,6 @@
 -define(TimeToStabilize, 100).
 %Timeout
 -define(Timeout, 10000).
-
-launch(N) ->
-  
-  % CHECK
-  timer:start(),
-
-  {ok, L} = inet:getif(),
-  IP = element(1, hd(L)),
-  io:format("~nNumber IP ~w : ~w ~n~n", [N, IP]),
-
-  Keys = [erlang:phash2("key1") rem ?Mbit, erlang:phash2("key2") rem ?Mbit],
-  io:format("Keys :~w ~n", [Keys]), 
-  
-  IPs = [IP, {172,18,0,67}, {192,168,0,10}, {10,0,0,15}],
-
-  Ring = [spawn(?MODULE, deploy, [erlang:phash2(X) rem ?Mbit]) || X <- IPs],
-
-  timer:sleep(2000),
-
-  io:format("Ring ~w / 1st : ~w~n", [Ring,lists:nth(1, Ring)]),
-
-  lists:nth(1, Ring) ! stabilize.
-
 
 deploy(N) ->
   deploy(N, nil, []).
@@ -215,11 +192,6 @@ remove_probe(T, Nodes) ->
 forward_probe(Ref, T, Nodes, Id, Successor, Store) ->
   {_, Spid} = Successor,
   Spid ! {probe, Ref, [{Id, self(), Store}|Nodes], T}.
-
-handle_node(Id) ->
-  NodeId = erlang:phash2(Id) rem ?Mbit,
-  io:format("~nStarting nodes : '~w'~nNode ID : ~w~n", [Id, NodeId]),  
-  node(Id,{},{},[]).
 
 
 addEntry(Key, Value, NodePid, Client) ->

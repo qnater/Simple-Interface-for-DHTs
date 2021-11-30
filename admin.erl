@@ -29,25 +29,24 @@ startRing(_,_,Nodes) ->
   KeyDelta = key:generate(),
 
   % FIRST AND LAST PROCESS..............................
-  {_,Node} = lists:nth(1, Nodes),
-  {_,Spid} = lists:last(Nodes),
+  {_,LastProcess} = lists:last(Nodes),
 
 
 
   % DYNAMIC INSERT OF KEY...............................
-  addKey(KeyAlpha, 31415, Node),
-  addKey(KeyBeta, 9265, Node),
-  addKey(KeyGamma, 3596, Node),
+  addKey(KeyAlpha, 31415, LastProcess),
+  addKey(KeyBeta, 9265, LastProcess),
+  addKey(KeyGamma, 3596, LastProcess),
 
 
 
   % DYMAMIC INSTER OF NODE.............................
-  UpdatedNodes_0 = addNode(KeyDelta, Spid, Nodes),
-  UpdatedNodes = addNode(KeyDelta+1, Spid, UpdatedNodes_0),
+  UpdatedNodes_0 = addNode(KeyDelta, LastProcess, Nodes),
+  UpdatedNodes = addNode(KeyDelta+1, LastProcess, UpdatedNodes_0),
   timer:sleep(2000),
 
   % LOOK FOR A KEY.....................................
-  lookFor(KeyAlpha, Spid),
+  lookFor(KeyAlpha, LastProcess),
 
 
 
@@ -69,16 +68,16 @@ listener(Key) ->
   end.
 
 
-lookFor(Key, Spid) ->
-  node:getEntry(Key, Spid, self()),
+lookFor(Key, Process) ->
+  node:getEntry(Key, Process, self()),
   listener(Key).
 
-addKey(Key, Value, Node) ->
-  node:addEntry(Key, Value, Node, self()),
+addKey(Key, Value, Process) ->
+  node:addEntry(Key, Value, Process, self()),
   listener(Key).
 
-addNode(Key, LastProcess, Nodes) ->
-  Pid = node:deploy(Key, LastProcess, []),
+addNode(Key, Process, Nodes) ->
+  Pid = node:deploy(Key, Process, []),
   UpdatedNodes = [{Key,Pid}|Nodes],
   UpdatedNodes.
 
