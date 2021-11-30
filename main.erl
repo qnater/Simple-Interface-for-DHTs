@@ -6,5 +6,5 @@ start() ->
   
   c:c(node),
   c:c(key),
-  c:c(run),
-  run:start().
+  c:c(admin),
+  admin:start().
