@@ -6,5 +6,5 @@ start() ->
   
   c:c(node),
   c:c(key),
-  c:c(admin),
-  admin:start().
+  c:c(ring),
+  ring:start().

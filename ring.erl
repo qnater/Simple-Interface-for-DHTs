@@ -1,5 +1,5 @@
--module(admin).
--export([start/0, startRing/1, startRing/3, stop/1, listener/1, lookFor/2, addKey/3]).
+-module(ring).
+-export([start/0, startRing/1, startRing/3, stop/1, listener/1, lookFor/2, addKey/3, handling/1, addNode/3, addNode/1, lookFor/1, addKey/2, info/0]).
 
 
 start() ->
@@ -28,33 +28,48 @@ startRing(_,_,Nodes) ->
   KeyGamma  = key:generate(),
   KeyDelta = key:generate(),
 
-  % FIRST AND LAST PROCESS..............................
-  {_,LastProcess} = lists:last(Nodes),
-
-
-
   % DYNAMIC INSERT OF KEY...............................
-  addKey(KeyAlpha, 31415, LastProcess),
-  addKey(KeyBeta, 9265, LastProcess),
-  addKey(KeyGamma, 3596, LastProcess),
-
-
+  addKey(KeyAlpha, 31415),
+  addKey(KeyBeta, 9265),
+  addKey(KeyGamma, 3596),
 
   % DYMAMIC INSTER OF NODE.............................
-  UpdatedNodes_0 = addNode(KeyDelta, LastProcess, Nodes),
-  UpdatedNodes = addNode(KeyDelta+1, LastProcess, UpdatedNodes_0),
-  timer:sleep(2000),
-
+  addNode(KeyDelta),
+  
   % LOOK FOR A KEY.....................................
-  lookFor(KeyAlpha, LastProcess),
-
-
+  lookFor(KeyAlpha),
 
   % LOGS...............................................
-  [Y!logs || {_,Y} <- UpdatedNodes],
-  io:format(">> Nodes : ~w ~n", [UpdatedNodes]),
+  info(),
+
+  handling(Nodes),
 
   Nodes.
+
+handling(Nodes) ->
+  {_,Process} = lists:last(Nodes),
+  receive
+    {h,lookfor,Key} ->
+      node:getEntry(Key, Process, self()),
+      listener(Key),
+      timer:sleep(1000),
+      handling(Nodes);
+    {h,addkey,Key,Value} ->
+      node:addEntry(Key, Value, Process, self()),
+      listener(Key),
+      timer:sleep(200),
+      handling(Nodes);
+    {h,addnode,Key} ->
+      Pid = node:deploy(Key, Process, []),
+      UpdatedNodes = [{Key,Pid}|Nodes],
+      timer:sleep(1000),
+      handling(UpdatedNodes);
+    info ->
+      [Y!logs || {_,Y} <- Nodes],
+      io:format(">> Nodes : ~w ~n", [Nodes]),
+      timer:sleep(200),
+      handling(Nodes)
+  end.
 
 
 listener(Key) ->
@@ -67,10 +82,23 @@ listener(Key) ->
       io:format("<< (~w) : The key ~w has the value ~w~n", [Qref, Key, R])
   end.
 
+info() ->
+  self() ! info.
+
+lookFor(Key) ->
+  self() ! {h,lookfor,Key}.
+
+addKey(Key, Value) ->
+  self() ! {h,addkey,Key,Value}.
+
+addNode(Key) ->
+  self() ! {h,addnode,Key}.
+
 
 lookFor(Key, Process) ->
   node:getEntry(Key, Process, self()),
-  listener(Key).
+  listener(Key),
+  m,n.
 
 addKey(Key, Value, Process) ->
   node:addEntry(Key, Value, Process, self()),
