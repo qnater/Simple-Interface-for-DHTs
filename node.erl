@@ -1,6 +1,6 @@
 -module(node).
 
--export([deploy/1, deploy/3, connect/2, notify/4, request/2, stabilize/3, node/4, create_probe/3, remove_probe/2, forward_probe/6, handover/3, add/8, lookup/7,addEntry/4, getEntry/3]).
+-export([deploy/1, deploy/3, connect/2, notify/4, request/2, stabilize/3, node/4, handover/3, add/8, lookup/7,addEntry/4, getEntry/3]).
 
 %Size of the ring
 -define(Mbit,64).
@@ -62,15 +62,6 @@ node(Id,Predecessor,Successor,Store) ->
     node(Id, Predecessor, Successor, Store);
 
   % ... Informations/Tests ...........................
-  probe ->
-    create_probe(Id, Successor, Store),
-    node(Id, Predecessor, Successor, Store);
-  {probe, Id, Nodes, T} ->
-    remove_probe(T, Nodes),
-    node(Id, Predecessor, Successor, Store);
-  {probe, Ref, Nodes, T} ->
-    forward_probe(Ref, T, Nodes, Id, Successor, Store),
-    node(Id, Predecessor, Successor, Store);
   {add, Key, Value, Qref, Client} ->
     Added = add(Key, Value, Qref, Client, Id, Predecessor, Successor, Store),
     node(Id, Predecessor, Successor, Added);
@@ -81,7 +72,8 @@ node(Id,Predecessor,Successor,Store) ->
     Merged = lists:keymerge(1, Elements, Store),
     node(Id, Predecessor, Successor, Merged);
   logs ->
-    io:format("RESULT> ~w -> Pred:~w Succ:~w STORE:~w~n",[Id,Predecessor,Successor,Store])
+    io:format("RESULT> ~w -> Pred:~w Succ:~w STORE:~w~n",[Id,Predecessor,Successor,Store]),
+    node(Id, Predecessor, Successor, Store)
   end.
 
 % add a key value pair, return the updated store
@@ -168,31 +160,6 @@ stabilize(Pred, Id, Successor) ->
           Successor
       end
   end.
-
-create_probe(Id, Successor, Store) ->
-  {_, Spid} = Successor,
-  Spid ! {probe, Id, [{Id, self(), Store}], erlang:timestamp()}.
-
-
-remove_probe(T, Nodes) ->
-  io:format("Probe : ~n",[]),
-  lists:foreach(
-    fun({Key, _, Store}) -> 
-            io:format("    Node ~w :~n", [Key]),
-            io:format("       Store:~n",[]), 
-            lists:foreach(
-              fun({K,V}) ->
-                  io:format("        [~w] -> [~w]~n", [K, V]) 
-              end,
-              Store)
-    end,
-    Nodes),
-  io:format("Took ~w ms.~n",[timer:now_diff(erlang:timestamp(), T)]).
-
-forward_probe(Ref, T, Nodes, Id, Successor, Store) ->
-  {_, Spid} = Successor,
-  Spid ! {probe, Ref, [{Id, self(), Store}|Nodes], T}.
-
 
 addEntry(Key, Value, NodePid, Client) ->
   Qref = make_ref(),
